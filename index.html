@@ -125,6 +125,7 @@
 
       <div class="buttons">
         <button onclick="convertText()">変換</button>
+        <button class="secondary" onclick="pasteText()">ペースト</button>
         <button class="secondary" onclick="copyResult()">コピー</button>
         <button class="secondary" onclick="clearAll()">クリア</button>
       </div>
@@ -227,6 +228,26 @@
       const result = buildResult(input);
       document.getElementById("output").textContent = result;
     }
+    
+    async function pasteText() {
+        try {
+        const clipText = await navigator.clipboard.readText();
+
+        if (!clipText) {
+            alert("クリップボードにテキストがありません");
+            return;
+        }
+
+        document.getElementById("input").value = clipText;
+
+        // ペーストしたら自動で変換したいならこれを有効にする
+        convertText();
+
+        } catch (e) {
+        alert("ペーストに失敗しました。ブラウザの許可設定を確認してください。");
+        console.error(e);
+        }
+    }
 
     async function copyResult() {
       const text = document.getElementById("output").textContent.trim();
@@ -243,10 +264,12 @@
       }
     }
 
-    
+
     function clearAll() {
       document.getElementById("input").value = "";
       document.getElementById("output").textContent = "ここに変換結果が表示されます";
+      document.getElementById("input").focus();
+
     }
   </script>
 </body>
