@@ -140,46 +140,56 @@
 
   <script>
     function normalizeUrl(text) {
-      const preferred = text.match(/https?:\/\/(?:app\.foursquare\.com|(?:www\.)?swarmapp\.com)\/share\/checkin\/\S+/i);
-      const anyUrl = text.match(/https?:\/\/\S+/i);
-      const raw = preferred ? preferred[0] : (anyUrl ? anyUrl[0] : "");
+    const preferred = text.match(
+        /https?:\/\/(?:app\.foursquare\.com|(?:www\.)?swarmapp\.com)\/share\/checkin\/\S+/i
+    );
 
-      if (!raw) return "";
+    const anyUrl = text.match(/https?:\/\/\S+/i);
+    const raw = preferred ? preferred[0] : (anyUrl ? anyUrl[0] : "");
 
-      return raw
+    if (!raw) return "";
+
+    return raw
         .replace("app.foursquare.com", "swarmapp.com")
         .replace("www.swarmapp.com", "swarmapp.com")
         .replace(/lang=ja\b/i, "lang=en");
     }
-
     function extractEvent(text) {
-      const m = text.match(/"([\s\S]+?)"/);
-      if (!m) return "";
-      return m[1]
-        .replace(/\n+/g, " ")
-        .replace(/\s+/g, " ")
-        .trim();
+    // まずは " から 「この https://」の直前まで
+    let match = text.match(/"([\s\S]*?)この\s+https?:\/\//);
+
+    // 保険: 取れなければ " から 空行または末尾まで
+    if (!match) {
+        match = text.match(/"([\s\S]*?)(?:\n\n|$)/);
     }
 
+    if (!match) return "";
+
+    const lines = match[1]
+        .split("\n")
+        .map(line => line.trim())
+        .filter(line => line.length > 0);
+
+    // 2行まで結合
+    return lines.slice(0, 2).join(" ");
+    }
     function extractLocationBlock(text) {
-      const m = text.match(/\(([^)]+)\)/);
-      return m ? m[1].trim() : "";
+    const match = text.match(/^\((.+)\)\s*$/m);
+    return match ? match[1].trim() : "";
     }
 
     function extractVenue(locationText) {
-      if (!locationText) return "";
+    if (!locationText) return "";
 
-      const firstCommaIndex = locationText.indexOf(",");
-      const beforeComma = firstCommaIndex >= 0 ? locationText.slice(0, firstCommaIndex).trim() : locationText.trim();
+    const beforeFirstComma = locationText.split(",")[0].trim();
 
-      if (!beforeComma) return "";
+    // 住所やフロア表記っぽい部分の前を会場名とみなす
+    const match = beforeFirstComma.match(/^(.*?)(?:\s+[^\s]*\d.*)?$/);
+    if (match) {
+        return match[1].trim();
+    }
 
-      const splitByAddress = beforeComma.match(/^(.+?)(?:\s+[^\s]*\d[\d\-丁目番地号0-9]*.*)?$/);
-      if (splitByAddress && splitByAddress[1]) {
-        return splitByAddress[1].trim();
-      }
-
-      return beforeComma;
+    return beforeFirstComma;
     }
 
     function extractArea(locationText) {
