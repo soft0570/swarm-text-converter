@@ -5,56 +5,237 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Swarm Text Converter</title>
   <style>
+    :root {
+      --bg: #f3f4f6;
+      --card: #ffffff;
+      --text: #111827;
+      --sub: #6b7280;
+      --border: #d1d5db;
+      --button: #111827;
+      --buttonSub: #6b7280;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
     body {
-      font-family: sans-serif;
-      padding: 24px;
-      background: #f2f2f2;
-      color: #111;
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      padding: 16px;
     }
-    .box {
-      max-width: 700px;
+
+    .container {
+      max-width: 760px;
       margin: 0 auto;
-      background: white;
-      padding: 20px;
-      border-radius: 12px;
     }
+
+    .card {
+      background: var(--card);
+      border-radius: 18px;
+      padding: 20px;
+      box-shadow: 0 4px 14px rgba(0, 0, 0, 0.06);
+    }
+
+    h1 {
+      margin: 0 0 10px 0;
+      font-size: 2rem;
+      line-height: 1.2;
+    }
+
+    p.desc {
+      margin: 0 0 16px 0;
+      color: var(--sub);
+      line-height: 1.6;
+    }
+
     textarea {
       width: 100%;
-      min-height: 180px;
-      margin-top: 12px;
-      margin-bottom: 12px;
+      min-height: 220px;
+      resize: vertical;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 14px;
       font-size: 16px;
+      line-height: 1.5;
+      background: white;
+      margin-bottom: 14px;
     }
+
+    .buttons {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-bottom: 14px;
+    }
+
     button {
-      padding: 10px 14px;
-      font-size: 16px;
+      border: none;
+      border-radius: 12px;
+      padding: 12px 16px;
+      font-size: 15px;
+      cursor: pointer;
+      color: white;
+      background: var(--button);
     }
-    #output {
-      margin-top: 16px;
+
+    button.secondary {
+      background: var(--buttonSub);
+    }
+
+    .output {
+      min-height: 100px;
       white-space: pre-wrap;
+      word-break: break-word;
+      border: 1px solid var(--border);
+      border-radius: 12px;
       background: #fafafa;
-      border: 1px solid #ddd;
-      padding: 12px;
-      border-radius: 8px;
+      padding: 14px;
+      font-size: 16px;
+      line-height: 1.6;
+    }
+
+    .note {
+      margin-top: 14px;
+      color: var(--sub);
+      font-size: 0.95rem;
+      line-height: 1.6;
+    }
+
+    .ok {
+      color: #065f46;
+    }
+
+    .warn {
+      color: #92400e;
     }
   </style>
 </head>
 <body>
-  <div class="box">
-    <h1>Swarm Text Converter</h1>
-    <p>テスト表示です。これが見えたら GitHub Pages は正常です。</p>
+  <div class="container">
+    <div class="card">
+      <h1>Swarm Text Converter</h1>
+      <p class="desc">
+        Swarm / Foursquare の共有文を、短い投稿用テキストに変換します。
+      </p>
 
-    <textarea id="input" placeholder="ここに共有文を貼り付け"></textarea>
-    <br>
-    <button onclick="run()">変換テスト</button>
+      <textarea id="input" placeholder="ここにSwarmの共有文を貼り付けてください"></textarea>
 
-    <div id="output">ここに結果が出ます</div>
+      <div class="buttons">
+        <button onclick="convertText()">変換</button>
+        <button class="secondary" onclick="copyResult()">コピー</button>
+        <button class="secondary" onclick="clearAll()">クリア</button>
+      </div>
+
+      <div id="output" class="output">ここに変換結果が表示されます</div>
+
+      <div class="note">
+        <div>・イベント名がある場合 → <span class="ok">イベント名 (@ 会場 in 区, 都道府県) URL</span></div>
+        <div>・イベント名がない場合 → <span class="ok">I'm at 会場 in 区, 都道府県 URL</span></div>
+      </div>
+    </div>
   </div>
 
   <script>
-    function run() {
+    function normalizeUrl(text) {
+      const preferred = text.match(/https?:\/\/(?:app\.foursquare\.com|(?:www\.)?swarmapp\.com)\/share\/checkin\/\S+/i);
+      const anyUrl = text.match(/https?:\/\/\S+/i);
+      const raw = preferred ? preferred[0] : (anyUrl ? anyUrl[0] : "");
+
+      if (!raw) return "";
+
+      return raw
+        .replace("app.foursquare.com", "swarmapp.com")
+        .replace("www.swarmapp.com", "swarmapp.com")
+        .replace(/lang=ja\b/i, "lang=en");
+    }
+
+    function extractEvent(text) {
+      const m = text.match(/"([\s\S]+?)"/);
+      if (!m) return "";
+      return m[1]
+        .replace(/\n+/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+    }
+
+    function extractLocationBlock(text) {
+      const m = text.match(/\(([^)]+)\)/);
+      return m ? m[1].trim() : "";
+    }
+
+    function extractVenue(locationText) {
+      if (!locationText) return "";
+
+      const firstCommaIndex = locationText.indexOf(",");
+      const beforeComma = firstCommaIndex >= 0 ? locationText.slice(0, firstCommaIndex).trim() : locationText.trim();
+
+      if (!beforeComma) return "";
+
+      const splitByAddress = beforeComma.match(/^(.+?)(?:\s+[^\s]*\d[\d\-丁目番地号0-9]*.*)?$/);
+      if (splitByAddress && splitByAddress[1]) {
+        return splitByAddress[1].trim();
+      }
+
+      return beforeComma;
+    }
+
+    function extractArea(locationText) {
+      if (!locationText) {
+        return { ward: "", prefecture: "" };
+      }
+
+      const parts = locationText.split(",").map(s => s.trim());
+      return {
+        ward: parts[1] || "",
+        prefecture: parts[2] || ""
+      };
+    }
+
+    function buildResult(text) {
+      const event = extractEvent(text);
+      const locationText = extractLocationBlock(text);
+      const venue = extractVenue(locationText);
+      const area = extractArea(locationText);
+      const url = normalizeUrl(text);
+
+      if (!venue) {
+        return "場所情報を見つけられませんでした。Swarm の共有文をそのまま貼り付けてください。";
+      }
+
+      if (event) {
+        return `${event} (@ ${venue} in ${area.ward}, ${area.prefecture}) ${url}`.trim();
+      }
+
+      return `I'm at ${venue} in ${area.ward}, ${area.prefecture} ${url}`.trim();
+    }
+
+    function convertText() {
       const input = document.getElementById("input").value;
-      document.getElementById("output").textContent = input || "入力なし";
+      const result = buildResult(input);
+      document.getElementById("output").textContent = result;
+    }
+
+    async function copyResult() {
+      const text = document.getElementById("output").textContent.trim();
+      if (!text || text === "ここに変換結果が表示されます") {
+        alert("まだ結果がありません");
+        return;
+      }
+
+      try {
+        await navigator.clipboard.writeText(text);
+        alert("コピーしました");
+      } catch (e) {
+        alert("コピーに失敗しました");
+      }
+    }
+
+    function clearAll() {
+      document.getElementById("input").value = "";
+      document.getElementById("output").textContent = "ここに変換結果が表示されます";
     }
   </script>
 </body>
