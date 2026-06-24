@@ -127,6 +127,7 @@
         <button onclick="convertText()">変換</button>
         <button class="secondary" onclick="pasteText()">ペースト</button>
         <button class="secondary" onclick="copyResult()">コピー</button>
+        <button class="secondary" onclick="postToX()">Xに投稿</button>
         <button class="secondary" onclick="clearAll()">クリア</button>
       </div>
 
@@ -262,6 +263,22 @@
       } catch (e) {
         alert("コピーに失敗しました");
       }
+    }
+
+    function postToX() {
+        const text = document.getElementById("output").textContent.trim();
+
+        if (!text || text === "ここに変換結果が表示されます") {
+        alert("先に変換してください");
+        return;
+        }
+
+        const encodedText = encodeURIComponent(text);
+
+        // どちらでもOK。x.com のほうを優先
+        const url = `https://x.com/intent/post?text=${encodedText}`;
+
+        window.open(url, "_blank");
     }
 
 
