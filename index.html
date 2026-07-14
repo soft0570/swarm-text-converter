@@ -127,7 +127,8 @@
         <button onclick="convertText()">変換</button>
         <button class="secondary" onclick="pasteText()">ペースト</button>
         <button class="secondary" onclick="copyResult()">コピー</button>
-        <button class="secondary" onclick="postToX()">共有</button>
+        <button class="secondary" onclick="shareResult()">共有</button>
+        <button class="secondary" onclick="postToX()">Xに投稿</button>
         <button class="secondary" onclick="clearAll()">クリア</button>
       </div>
 
@@ -265,14 +266,33 @@
       }
     }
 
-    async function postToX() {
+    async function shareResult() {
       const text = document.getElementById("output").textContent.trim();
 
-      if (navigator.share) {
-        await navigator.share({
-          text: text
-        });
+      if (!text || text === "ここに変換結果が表示されます") {
+        alert("先に変換してください");
+        return;
       }
+
+      if (navigator.share) {
+        try {
+          await navigator.share({
+            text: text
+          });
+        } catch (e) {
+          console.log(e);
+        }
+      } else {
+        alert("このブラウザは共有機能に対応していません");
+      }
+    }
+
+    function postToX() {
+      const text = document.getElementById("output").textContent.trim();
+      const encodedText = encodeURIComponent(text);
+
+      // Xアプリ起動を試す
+      location.href = `twitter://post?message=${encodedText}`;
     }
 
 
