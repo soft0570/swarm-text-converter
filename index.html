@@ -130,9 +130,9 @@
         const res = await fetch(`${WORKER_API_URL}?url=${encodeURIComponent(url)}`);
         const data = await res.json();
 
-        if (data.ogTitle) {
-          const locationText = formatLocationText(data.ogTitle);
-          output.textContent = `${locationText} ${url}`.trim();
+        if (data.formatted) {
+          // 「I'm at 明治神宮野球場 in 新宿区, 東京都 https://swarmapp.com/...」の形式で出力
+          output.textContent = `${data.formatted} ${url}`.trim();
         } else {
           output.textContent = "場所情報を取得できませんでした。";
         }
