@@ -31,18 +31,49 @@
     }
     h1 { margin: 0 0 10px 0; font-size: 2rem; line-height: 1.2; }
     p.desc { margin: 0 0 16px 0; color: var(--sub); line-height: 1.6; }
-    textarea {
+    
+    label {
+      display: block;
+      font-weight: bold;
+      margin-bottom: 6px;
+      font-size: 0.95rem;
+    }
+
+    input[type="text"], textarea {
       width: 100%;
-      min-height: 160px;
-      resize: vertical;
       border: 1px solid var(--border);
       border-radius: 12px;
-      padding: 14px;
-      font-size: 16px;
+      padding: 12px;
+      font-size: 15px;
       line-height: 1.5;
       background: white;
       margin-bottom: 14px;
     }
+
+    textarea {
+      min-height: 100px;
+      resize: vertical;
+    }
+
+    .options {
+      display: flex;
+      gap: 16px;
+      margin-bottom: 16px;
+      background: #f9fafb;
+      padding: 12px;
+      border-radius: 12px;
+      border: 1px solid var(--border);
+    }
+
+    .options label {
+      font-weight: normal;
+      margin: 0;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
     .buttons { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 14px; }
     button {
       border: none;
@@ -73,7 +104,18 @@
       <h1>Swarm Text Converter</h1>
       <p class="desc">Swarmの共有URLを貼り付けて変換します。</p>
 
-      <textarea id="input" placeholder="ここにSwarmのURLを貼り付けてください"></textarea>
+      <label for="eventInput">イベント名・追記事項（任意）</label>
+      <input type="text" id="eventInput" placeholder="例: ミュージカル公演 劇団東少 人魚姫">
+
+      <label for="input">SwarmのURL / 共有文章</label>
+      <textarea id="input" placeholder="ここにSwarmのURLまたは共有テキストを貼り付けてください"></textarea>
+
+      <label>出力フォーマット</label>
+      <div class="options">
+        <label><input type="radio" name="formatMode" value="auto" checked> 自動判定（イベントあり→@ / なし→I'm at）</label>
+        <label><input type="radio" name="formatMode" value="at"> `@` 形式強制</label>
+        <label><input type="radio" name="formatMode" value="imat"> `I'm at` 形式強制</label>
+      </div>
 
       <div class="buttons">
         <button onclick="convertText()">変換</button>
@@ -88,7 +130,6 @@
   </div>
 
   <script>
-    // Cloudflare Worker の Endpoint URL（末尾の / を整理）
     const WORKER_API_URL = "https://frosty-leaf-658b.y09064054612.workers.dev";
 
     function normalizeUrl(text) {
@@ -101,8 +142,27 @@
         .replace(/lang=ja\b/i, "lang=en");
     }
 
+    // テキスト欄からイベント名を拾うフォールバックロジック
+    function extractEventFromInputText(inputText) {
+      if (!inputText) return "";
+      const quoteMatch = inputText.match(/"([\s\S]*?)"/);
+      if (quoteMatch && quoteMatch[1].trim()) return quoteMatch[1].trim();
+
+      const urlIndex = inputText.search(/https?:\/\//i);
+      let textBeforeUrl = urlIndex !== -1 ? inputText.substring(0, urlIndex) : inputText;
+
+      textBeforeUrl = textBeforeUrl
+        .replace(/I'm at .*?in .*/gi, "")
+        .replace(/I'm at .*/gi, "")
+        .replace(/この\s*$/, "")
+        .trim();
+
+      return textBeforeUrl;
+    }
+
     async function convertText() {
       const input = document.getElementById("input").value.trim();
+      const manualEvent = document.getElementById("eventInput").value.trim();
       const output = document.getElementById("output");
 
       const url = normalizeUrl(input);
@@ -117,14 +177,42 @@
         const res = await fetch(`${WORKER_API_URL}?url=${encodeURIComponent(url)}`);
         const data = await res.json();
 
-        // Workerの返却値（data.formatted または data.ogTitle）を受け取る
-        const resultText = data.formatted || data.ogTitle || "";
-
-        if (resultText) {
-          output.textContent = `${resultText} ${url}`.trim();
-        } else {
+        if (!data.venue) {
           output.textContent = "場所情報を取得できませんでした。";
+          return;
         }
+
+        // イベント名の確定（入力ボックス優先 ＞ テキスト解析）
+        const eventText = manualEvent || extractEventFromInputText(input);
+
+        // 住所フォーマット
+        let locationPart = "";
+        if (data.ward && data.prefecture) {
+          locationPart = `in ${data.ward}, ${data.prefecture}`;
+        } else if (data.prefecture) {
+          locationPart = `in ${data.prefecture}`;
+        }
+
+        const mode = document.querySelector('input[name="formatMode"]:checked').value;
+        let formattedResult = "";
+
+        // 出力モード判定
+        const useAtFormat = (mode === "at") || (mode === "auto" && eventText !== "");
+
+        if (useAtFormat) {
+          // @ 形式: [イベント名] (@ [会場] in [区], [都道府県]) [URL]
+          const venueInfo = locationPart ? `@ ${data.venue} ${locationPart}` : `@ ${data.venue}`;
+          const prefix = eventText ? `${eventText} ` : "";
+          formattedResult = `${prefix}(${venueInfo.trim()}) ${url}`;
+        } else {
+          // I'm at 形式: [イベント名] I'm at [会場] in [区], [都道府県] [URL]
+          const venueInfo = locationPart ? `${data.venue} ${locationPart}` : data.venue;
+          const prefix = eventText ? `${eventText} ` : "";
+          formattedResult = `${prefix}I'm at ${venueInfo.trim()} ${url}`;
+        }
+
+        output.textContent = formattedResult.trim();
+
       } catch (e) {
         console.error(e);
         output.textContent = "通信エラーが発生しました。WorkerのURLを確認してください。";
@@ -157,9 +245,10 @@
     }
 
     function clearAll() {
+      document.getElementById("eventInput").value = "";
       document.getElementById("input").value = "";
       document.getElementById("output").textContent = "ここに変換結果が表示されます";
-      document.getElementById("input").focus();
+      document.getElementById("eventInput").focus();
     }
   </script>
 </body>
