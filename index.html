@@ -88,7 +88,7 @@
   </div>
 
   <script>
-    // ※ 作成した Cloudflare Worker の Endpoint URL に置き換えてください
+    // ※ 作成した Cloudflare Worker の URL を指定
     const WORKER_API_URL = "https://frosty-leaf-658b.y09064054612.workers.dev/";
 
     function normalizeUrl(text) {
@@ -99,6 +99,19 @@
         .replace("app.foursquare.com", "swarmapp.com")
         .replace("www.swarmapp.com", "swarmapp.com")
         .replace(/lang=ja\b/i, "lang=en");
+    }
+
+    // ogTitle から "I'm at 会場名 in 区, 都道府県" のフォーマットを抽出・整形
+    function formatLocationText(ogTitle) {
+      if (!ogTitle) return "";
+
+      // 既に "I'm at ..." で始まっている場合
+      if (/^I'm at/i.test(ogTitle)) {
+        return ogTitle;
+      }
+
+      // "明治神宮野球場 in 新宿区, 東京都" 形式の場合に "I'm at " を補完
+      return `I'm at ${ogTitle}`;
     }
 
     async function convertText() {
@@ -118,8 +131,8 @@
         const data = await res.json();
 
         if (data.ogTitle) {
-          // "I'm at 明治神宮野球場 in 新宿区, 東京都" のテキストと整形済みURLを結合
-          output.textContent = `${data.ogTitle} ${url}`.trim();
+          const locationText = formatLocationText(data.ogTitle);
+          output.textContent = `${locationText} ${url}`.trim();
         } else {
           output.textContent = "場所情報を取得できませんでした。";
         }
