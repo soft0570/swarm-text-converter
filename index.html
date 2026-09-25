@@ -53,7 +53,7 @@
 
     textarea {
       width: 100%;
-      min-height: 220px;
+      min-height: 180px;
       resize: vertical;
       border: 1px solid var(--border);
       border-radius: 12px;
@@ -107,10 +107,6 @@
     .ok {
       color: #065f46;
     }
-
-    .warn {
-      color: #92400e;
-    }
   </style>
 </head>
 <body>
@@ -118,10 +114,10 @@
     <div class="card">
       <h1>Swarm Text Converter</h1>
       <p class="desc">
-        Swarm / Foursquare の共有文を、短い投稿用テキストに変換します。
+        Swarmの共有文またはURLを貼り付けて変換します。
       </p>
 
-      <textarea id="input" placeholder="ここにSwarmの共有文を貼り付けてください"></textarea>
+      <textarea id="input" placeholder="ここにSwarmの共有文またはURLを貼り付けてください"></textarea>
 
       <div class="buttons">
         <button onclick="convertText()">変換</button>
@@ -143,63 +139,52 @@
 
   <script>
     function normalizeUrl(text) {
-    const preferred = text.match(
+      const preferred = text.match(
         /https?:\/\/(?:app\.foursquare\.com|(?:www\.)?swarmapp\.com)\/share\/checkin\/\S+/i
-    );
+      );
 
-    const anyUrl = text.match(/https?:\/\/\S+/i);
-    const raw = preferred ? preferred[0] : (anyUrl ? anyUrl[0] : "");
+      const anyUrl = text.match(/https?:\/\/\S+/i);
+      const raw = preferred ? preferred[0] : (anyUrl ? anyUrl[0] : "");
 
-    if (!raw) return "";
+      if (!raw) return "";
 
-    return raw
+      return raw
         .replace("app.foursquare.com", "swarmapp.com")
         .replace("www.swarmapp.com", "swarmapp.com")
         .replace(/lang=ja\b/i, "lang=en");
     }
+
     function extractEvent(text) {
-    // まずは " から 「この https://」の直前まで
-    let match = text.match(/"([\s\S]*?)この\s+https?:\/\//);
-
-    // 保険: 取れなければ " から 空行または末尾まで
-    if (!match) {
+      let match = text.match(/"([\s\S]*?)この\s+https?:\/\//);
+      if (!match) {
         match = text.match(/"([\s\S]*?)(?:\n\n|$)/);
-    }
+      }
+      if (!match) return "";
 
-    if (!match) return "";
-
-    const lines = match[1]
+      const lines = match[1]
         .split("\n")
         .map(line => line.trim())
         .filter(line => line.length > 0);
 
-    // 2行まで結合
-    return lines.slice(0, 2).join(" ");
+      return lines.slice(0, 2).join(" ");
     }
+
     function extractLocationBlock(text) {
-    const match = text.match(/^\((.+)\)\s*$/m);
-    return match ? match[1].trim() : "";
+      const match = text.match(/^\((.+)\)\s*$/m);
+      return match ? match[1].trim() : "";
     }
 
     function extractVenue(locationText) {
-    if (!locationText) return "";
-
-    const beforeFirstComma = locationText.split(",")[0].trim();
-
-    // 住所やフロア表記っぽい部分の前を会場名とみなす
-    const match = beforeFirstComma.match(/^(.*?)(?:\s+[^\s]*\d.*)?$/);
-    if (match) {
-        return match[1].trim();
-    }
-
-    return beforeFirstComma;
+      if (!locationText) return "";
+      const beforeFirstComma = locationText.split(",")[0].trim();
+      const match = beforeFirstComma.match(/^(.*?)(?:\s+[^\s]*\d.*)?$/);
+      return match ? match[1].trim() : beforeFirstComma;
     }
 
     function extractArea(locationText) {
       if (!locationText) {
         return { ward: "", prefecture: "" };
       }
-
       const parts = locationText.split(",").map(s => s.trim());
       return {
         ward: parts[1] || "",
@@ -207,54 +192,109 @@
       };
     }
 
-    function buildResult(text) {
+    // --- 追加: URLから直接OGP情報を解析して場所情報を特定する関数 ---
+    async function fetchDetailsFromUrl(url) {
+      try {
+        const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`;
+        const res = await fetch(proxyUrl);
+        const data = await res.json();
+        if (!data.contents) return null;
+
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(data.contents, "text/html");
+
+        // og:title や og:description から情報を抽出
+        const ogTitle = doc.querySelector('meta[property="og:title"]')?.getAttribute('content') || doc.title || "";
+        const ogDesc = doc.querySelector('meta[property="og:description"]')?.getAttribute('content') || "";
+
+        let venue = "";
+        let ward = "";
+        let prefecture = "";
+
+        // タイトル例: "I'm at 明治神宮野球場 in 新宿区, 東京都"
+        const titleMatch = ogTitle.match(/I'm at ([^in]+)\s+in\s+([^,]+),\s*(.+)$/i);
+        if (titleMatch) {
+          venue = titleMatch[1].trim();
+          ward = titleMatch[2].trim();
+          prefecture = titleMatch[3].trim();
+        } else {
+          // 説明欄などからの補正処理
+          venue = ogTitle.replace(/ - Swarm.*/i, "").replace(/^I'm at /i, "").trim();
+          const areaMatch = ogDesc.match(/([^\s]+区|[^\s]+市|[^\s]+町|[^\s]+村),\s*([^\s]+[都道府県])/);
+          if (areaMatch) {
+            ward = areaMatch[1];
+            prefecture = areaMatch[2];
+          }
+        }
+
+        return { venue, ward, prefecture };
+      } catch (e) {
+        console.error("URL解析エラー:", e);
+        return null;
+      }
+    }
+
+    async function buildResult(text) {
+      const url = normalizeUrl(text);
       const event = extractEvent(text);
       const locationText = extractLocationBlock(text);
-      const venue = extractVenue(locationText);
-      const area = extractArea(locationText);
-      const url = normalizeUrl(text);
 
-      if (!venue) {
-        return "場所情報を見つけられませんでした。Swarm の共有文をそのまま貼り付けてください。";
+      // 1. テキスト形式の共有文が含まれている場合（従来のロジック）
+      if (locationText) {
+        const venue = extractVenue(locationText);
+        const area = extractArea(locationText);
+
+        if (event) {
+          return `${event} (@ ${venue} in ${area.ward}, ${area.prefecture}) ${url}`.trim();
+        }
+        return `I'm at ${venue} in ${area.ward}, ${area.prefecture} ${url}`.trim();
       }
 
-      if (event) {
-        return `${event} (@ ${venue} in ${area.ward}, ${area.prefecture}) ${url}`.trim();
+      // 2. URL単体のみ貼り付けられている場合（追加ロジック）
+      if (url) {
+        document.getElementById("output").textContent = "URLから情報を取得中...";
+        const fetched = await fetchDetailsFromUrl(url);
+
+        if (fetched && fetched.venue) {
+          const areaStr = (fetched.ward && fetched.prefecture) 
+            ? ` in ${fetched.ward}, ${fetched.prefecture}` 
+            : "";
+          return `I'm at ${fetched.venue}${areaStr} ${url}`.trim();
+        }
       }
 
-      return `I'm at ${venue} in ${area.ward}, ${area.prefecture} ${url}`.trim();
+      return "場所情報を見つけられませんでした。Swarmの共有文またはURLを貼り付けてください。";
     }
 
-    function convertText() {
-      const input = document.getElementById("input").value;
-      const result = buildResult(input);
+    async function convertText() {
+      const input = document.getElementById("input").value.trim();
+      if (!input) {
+        alert("テキストまたはURLを入力してください");
+        return;
+      }
+      const result = await buildResult(input);
       document.getElementById("output").textContent = result;
     }
-    
+
     async function pasteText() {
-        try {
+      try {
         const clipText = await navigator.clipboard.readText();
-
         if (!clipText) {
-            alert("クリップボードにテキストがありません");
-            return;
+          alert("クリップボードにテキストがありません");
+          return;
         }
-
         document.getElementById("input").value = clipText;
-
-        // ペーストしたら自動で変換したいならこれを有効にする
-        convertText();
-
-        } catch (e) {
+        await convertText();
+      } catch (e) {
         alert("ペーストに失敗しました。ブラウザの許可設定を確認してください。");
         console.error(e);
-        }
+      }
     }
 
     async function copyResult() {
       const text = document.getElementById("output").textContent.trim();
-      if (!text || text === "ここに変換結果が表示されます") {
-        alert("まだ結果がありません");
+      if (!text || text === "ここに変換結果が表示されます" || text === "URLから情報を取得中...") {
+        alert("まだ有効な結果がありません");
         return;
       }
 
@@ -268,17 +308,14 @@
 
     async function shareResult() {
       const text = document.getElementById("output").textContent.trim();
-
-      if (!text || text === "ここに変換結果が表示されます") {
+      if (!text || text === "ここに変換結果が表示されます" || text === "URLから情報を取得中...") {
         alert("先に変換してください");
         return;
       }
 
       if (navigator.share) {
         try {
-          await navigator.share({
-            text: text
-          });
+          await navigator.share({ text: text });
         } catch (e) {
           console.log(e);
         }
@@ -289,18 +326,18 @@
 
     function postToX() {
       const text = document.getElementById("output").textContent.trim();
+      if (!text || text === "ここに変換結果が表示されます" || text === "URLから情報を取得中...") {
+        alert("先に変換してください");
+        return;
+      }
       const encodedText = encodeURIComponent(text);
-
-      // Xアプリ起動を試す
       location.href = `twitter://post?message=${encodedText}`;
     }
-
 
     function clearAll() {
       document.getElementById("input").value = "";
       document.getElementById("output").textContent = "ここに変換結果が表示されます";
       document.getElementById("input").focus();
-
     }
   </script>
 </body>
