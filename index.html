@@ -192,44 +192,37 @@
       };
     }
 
-    // --- 追加: URLから直接OGP情報を解析して場所情報を特定する関数 ---
-    async function fetchDetailsFromUrl(url) {
+    // SwarmのチェックインIDからFoursquare API経由でスポット情報を直接取得する関数
+    async function fetchDetailsFromCheckinId(checkinId, signature) {
       try {
-        const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`;
-        const res = await fetch(proxyUrl);
-        const data = await res.json();
-        if (!data.contents) return null;
-
-        const parser = new DOMParser();
-        const doc = parser.parseFromString(data.contents, "text/html");
-
-        // og:title や og:description から情報を抽出
-        const ogTitle = doc.querySelector('meta[property="og:title"]')?.getAttribute('content') || doc.title || "";
-        const ogDesc = doc.querySelector('meta[property="og:description"]')?.getAttribute('content') || "";
-
-        let venue = "";
-        let ward = "";
-        let prefecture = "";
-
-        // タイトル例: "I'm at 明治神宮野球場 in 新宿区, 東京都"
-        const titleMatch = ogTitle.match(/I'm at ([^in]+)\s+in\s+([^,]+),\s*(.+)$/i);
-        if (titleMatch) {
-          venue = titleMatch[1].trim();
-          ward = titleMatch[2].trim();
-          prefecture = titleMatch[3].trim();
-        } else {
-          // 説明欄などからの補正処理
-          venue = ogTitle.replace(/ - Swarm.*/i, "").replace(/^I'm at /i, "").trim();
-          const areaMatch = ogDesc.match(/([^\s]+区|[^\s]+市|[^\s]+町|[^\s]+村),\s*([^\s]+[都道府県])/);
-          if (areaMatch) {
-            ward = areaMatch[1];
-            prefecture = areaMatch[2];
-          }
+        const clientVersion = "20231010";
+        let apiUrl = `https://api.foursquare.com/v2/checkins/${checkinId}?v=${clientVersion}`;
+        if (signature) {
+          apiUrl += `&signature=${signature}`;
         }
 
-        return { venue, ward, prefecture };
+        const res = await fetch(apiUrl);
+        if (!res.ok) throw new Error("API取得失敗");
+        
+        const data = await res.json();
+        const checkin = data.response?.checkin;
+        if (!checkin) return null;
+
+        const venue = checkin.venue?.name || "";
+        const location = checkin.venue?.location || {};
+        
+        // 都道府県と市区町村の取得
+        const state = location.state || location.cc || "";
+        const city = location.city || location.formattedAddress?.[1] || "";
+
+        return {
+          venue: venue,
+          ward: city,
+          prefecture: state,
+          shout: checkin.shout || ""
+        };
       } catch (e) {
-        console.error("URL解析エラー:", e);
+        console.error("API取得エラー:", e);
         return null;
       }
     }
@@ -239,7 +232,7 @@
       const event = extractEvent(text);
       const locationText = extractLocationBlock(text);
 
-      // 1. テキスト形式の共有文が含まれている場合（従来のロジック）
+      // 1. 従来のテキスト形式共有文の場合
       if (locationText) {
         const venue = extractVenue(locationText);
         const area = extractArea(locationText);
@@ -250,16 +243,29 @@
         return `I'm at ${venue} in ${area.ward}, ${area.prefecture} ${url}`.trim();
       }
 
-      // 2. URL単体のみ貼り付けられている場合（追加ロジック）
+      // 2. URL単体貼り付けの場合
       if (url) {
-        document.getElementById("output").textContent = "URLから情報を取得中...";
-        const fetched = await fetchDetailsFromUrl(url);
+        // URLから Checkin ID と Signature(s=...) を抽出
+        const idMatch = url.match(/\/checkin\/([a-zA-Z0-9]+)/);
+        const sigMatch = url.match(/[?&]s=([a-zA-Z0-9_-]+)/);
 
-        if (fetched && fetched.venue) {
-          const areaStr = (fetched.ward && fetched.prefecture) 
-            ? ` in ${fetched.ward}, ${fetched.prefecture}` 
-            : "";
-          return `I'm at ${fetched.venue}${areaStr} ${url}`.trim();
+        if (idMatch) {
+          document.getElementById("output").textContent = "URLから情報を取得中...";
+          const checkinId = idMatch[1];
+          const signature = sigMatch ? sigMatch[1] : "";
+
+          const fetched = await fetchDetailsFromCheckinId(checkinId, signature);
+
+          if (fetched && fetched.venue) {
+            const areaStr = (fetched.ward || fetched.prefecture)
+              ? ` in ${fetched.ward}${fetched.ward && fetched.prefecture ? ', ' : ''}${fetched.prefecture}`
+              : "";
+            
+            if (fetched.shout) {
+              return `${fetched.shout} (@ ${fetched.venue}${areaStr}) ${url}`.trim();
+            }
+            return `I'm at ${fetched.venue}${areaStr} ${url}`.trim();
+          }
         }
       }
 
